@@ -1,0 +1,7 @@
+fifo,seed,architecture,read_clock_to_data_ns,launch_ff_output_increment_ns,buffer_stage_count,buffer_segment_increment_ns,logic_segment_increment_ns,max_observed_path_fanout
+8x32,1,baseline,0.7326,0.1740,2,0.2633,0.2952,38
+8x32,1,decoder,0.5383,0.1018,1,0.0832,0.3531,8
+32x32,1,baseline,0.7979,0.1934,3,0.3631,0.2413,32
+32x32,1,decoder,0.6747,0.1006,2,0.2291,0.3450,18
+64x32,1,baseline,0.8703,0.1545,4,0.4939,0.2217,48
+64x32,1,decoder,0.7606,0.1012,4,0.3075,0.3520,21
