@@ -1,0 +1,70 @@
+name: Analyse FIFO width versus depth across both runs
+
+on:
+  workflow_run:
+    workflows:
+      - "FIFO read-path repeatability — controlled placement seeds"
+      - "FIFO width-depth one-factor sweeps (matched cores)"
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fifo-width-depth-cross-analysis
+  cancel-in-progress: false
+
+jobs:
+  analyse:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find latest completed workflow runs
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh run list --workflow readpath-repeatability.yml --branch main --limit 15 \
+            --json databaseId,status,conclusion > /tmp/repeat-runs.json
+          gh run list --workflow readpath-width-depth.yml --branch main --limit 15 \
+            --json databaseId,status,conclusion > /tmp/width-depth-runs.json
+          repeat_id="$(jq -r '[.[] | select(.status == "completed")][0].databaseId // empty' /tmp/repeat-runs.json)"
+          sweep_id="$(jq -r '[.[] | select(.status == "completed")][0].databaseId // empty' /tmp/width-depth-runs.json)"
+          echo "repeat_id=$repeat_id" >> "$GITHUB_OUTPUT"
+          echo "sweep_id=$sweep_id" >> "$GITHUB_OUTPUT"
+          if [[ -z "$repeat_id" || -z "$sweep_id" ]]; then
+            echo "Both workflows must complete before merged trend analysis."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Found repeatability run $repeat_id and width-depth run $sweep_id"
+          fi
+      - name: Download complete and partial experimental archives
+        if: steps.source.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPEAT_ID: ${{ steps.source.outputs.repeat_id }}
+          SWEEP_ID: ${{ steps.source.outputs.sweep_id }}
+        run: |
+          mkdir -p collected
+          gh run download "$REPEAT_ID" --pattern 'repeat-*-s*-*' --dir collected
+          gh run download "$SWEEP_ID" --pattern 'width-depth-*-s*-*' --dir collected
+          echo "Source repeatability: https://github.com/$GH_REPO/actions/runs/$REPEAT_ID"
+          echo "Source width-depth: https://github.com/$GH_REPO/actions/runs/$SWEEP_ID"
+      - name: Calculate fixed-width and fixed-depth trends
+        if: steps.source.outputs.ready == 'true'
+        run: |
+          python3 research/readpath/scripts/analyse_width_depth.py collected cross-analysis
+      - name: Preserve trend analysis and missing-run warnings
+        if: always() && steps.source.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: width-depth-cross-analysis-${{ github.run_id }}
+          path: cross-analysis/
+          retention-days: 90
+          if-no-files-found: warn

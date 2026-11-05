@@ -1,0 +1,109 @@
+name: FIFO width-depth one-factor sweeps (matched cores)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/readpath-width-depth.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readpath-width-depth-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORFS_REV: d056a2b304182bf76ff10653531165b1dd9848d4
+  ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+  ORFS_ROOT: /tmp/openroad-research-orfs
+
+jobs:
+  paired:
+    name: ${{ matrix.width }}x${{ matrix.depth }} matched seed ${{ matrix.seed }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {width: 32, depth: 8, seed: 1}
+          - {width: 32, depth: 8, seed: 2}
+          - {width: 32, depth: 8, seed: 3}
+          - {width: 32, depth: 8, seed: 4}
+          - {width: 32, depth: 8, seed: 5}
+          - {width: 32, depth: 64, seed: 1}
+          - {width: 32, depth: 64, seed: 2}
+          - {width: 32, depth: 64, seed: 3}
+          - {width: 32, depth: 64, seed: 4}
+          - {width: 32, depth: 64, seed: 5}
+          - {width: 8, depth: 32, seed: 1}
+          - {width: 8, depth: 32, seed: 2}
+          - {width: 8, depth: 32, seed: 3}
+          - {width: 8, depth: 32, seed: 4}
+          - {width: 8, depth: 32, seed: 5}
+          - {width: 64, depth: 32, seed: 1}
+          - {width: 64, depth: 32, seed: 2}
+          - {width: 64, depth: 32, seed: 3}
+          - {width: 64, depth: 32, seed: 4}
+          - {width: 64, depth: 32, seed: 5}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned ORFS and standard-cell platform
+        run: |
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          echo "ORFS: $(git -C "$ORFS_ROOT" rev-parse HEAD)"
+      - name: Verify baseline and decoder against the independent queue model
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -g2012 -s fifo_readpath_equiv_tb \
+            -P fifo_readpath_equiv_tb.DATA_WIDTH=${{ matrix.width }} \
+            -P fifo_readpath_equiv_tb.DEPTH=${{ matrix.depth }} \
+            -o /tmp/paired.vvp \
+            rtl/fifo_sync.v research/readpath/rtl/fifo_sync_onehot.v \
+            research/readpath/tb/fifo_readpath_equiv_tb.v
+          vvp /tmp/paired.vvp
+      - name: Paired matched-core P&R and post-route SPEF timing
+        env:
+          READPATH_GPL_SEED: ${{ matrix.seed }}
+        run: |
+          bash research/readpath/scripts/run_openroad_comparison.sh \
+            ${{ matrix.width }} ${{ matrix.depth }} matched
+      - name: Archive exact paired reports and stage evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: width-depth-${{ matrix.width }}x${{ matrix.depth }}-s${{ matrix.seed }}-${{ github.run_id }}
+          path: research-pilot-reports/openroad_${{ matrix.width }}x${{ matrix.depth }}_matched_seed${{ matrix.seed }}/
+          retention-days: 90
+          if-no-files-found: warn
+
+  summarize:
+    name: Summarize all 20 additional matched-core experiments
+    needs: paired
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve new configuration archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: width-depth-*-${{ github.run_id }}
+          path: collected
+      - name: Summarize measured delay, area, wire, vias and seed variation
+        run: |
+          python3 research/readpath/scripts/aggregate_width_depth.py collected width-depth-summary
+      - name: Archive CSV, JSON and report, including partial results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: width-depth-summary-${{ github.run_id }}
+          path: width-depth-summary/
+          if-no-files-found: warn
+          retention-days: 90
