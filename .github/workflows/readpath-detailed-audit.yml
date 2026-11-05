@@ -1,0 +1,86 @@
+name: Archived FIFO read-path detailed cell/net STA
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/readpath-detailed-audit.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: readpath-archived-detailed-sta-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORFS_REV: d056a2b304182bf76ff10653531165b1dd9848d4
+  ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+  ORFS_ROOT: /tmp/openroad-research-orfs
+
+jobs:
+  archived-sta:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download two existing paired result archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p raw/8x32 raw/64x32
+          gh run download 41954769170 --name width-depth-8x32-s1-41954769170 --dir raw/8x32
+          gh run download 41954769170 --name width-depth-64x32-s1-41954769170 --dir raw/64x32
+          python3 research/readpath/scripts/prepare_archives.py raw audit-input
+          sha256sum audit-input/*/*/6_final.{odb,sdc,spef} > audit-input/source-sha256.txt
+          cat audit-input/provenance.json
+      - name: Recreate pinned OpenROAD analysis environment
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          test "$(git -C "$ORFS_ROOT" rev-parse HEAD)" = "$ORFS_REV"
+      - name: Analyze archived ODB and SPEF without rerunning placement or routing
+        run: |
+          set -euo pipefail
+          cp research/readpath/scripts/readpath_detailed_sta.tcl "$ORFS_ROOT/flow/scripts/research_readpath_detailed_sta.tcl"
+          mkdir -p audit-reports
+          for size in 8x32 64x32; do
+            for arch in baseline decoder; do
+              mkdir -p "audit-reports/$size/$arch"
+              if ! docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$ORFS_ROOT/flow:/OpenROAD-flow-scripts/flow" \
+                -v "$PWD/audit-input:/audit-input" \
+                -v "$PWD/audit-reports:/audit-reports" \
+                -w /OpenROAD-flow-scripts/flow \
+                -e READPATH_DESIGN_DIR="/audit-input/$size/$arch" \
+                -e READPATH_REPORT_DIR="/audit-reports/$size/$arch" \
+                "$ORFS_IMAGE" bash -lc 'source ../env.sh && openroad -exit ./scripts/research_readpath_detailed_sta.tcl' \
+                > "audit-reports/$size/$arch/console.log" 2>&1; then
+                tail -n 100 "audit-reports/$size/$arch/console.log"
+                exit 1
+              fi
+              test -s "audit-reports/$size/$arch/readpath-detailed.rpt"
+              cp "audit-reports/$size/$arch/readpath-detailed.rpt" "audit-input/$size/$arch/readpath-detailed.rpt"
+            done
+          done
+      - name: Reconcile detailed cell/net arc delays against original STA values
+        run: |
+          python3 research/readpath/scripts/parse_detailed_sta.py audit-input audit-report
+      - name: Archive raw detailed STA and audited decomposition
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: readpath-physical-mechanism-${{ github.run_id }}
+          path: |
+            audit-report/
+            audit-reports/
+            audit-input/provenance.json
+            audit-input/source-sha256.txt
+          if-no-files-found: warn
+          retention-days: 90
