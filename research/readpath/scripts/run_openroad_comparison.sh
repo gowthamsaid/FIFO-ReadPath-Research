@@ -8,6 +8,18 @@ if [[ $# -ne 3 || ! "$1" =~ ^[0-9]+$ || ! "$2" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 width="$1"; depth="$2"; geometry="$3"
+# Optional repeatability controls. Default (no seed) preserves earlier experiments.
+placement_seed="${READPATH_GPL_SEED:-}"
+placement_only="${READPATH_STOP_AFTER_PLACEMENT:-0}"
+if [[ -n "$placement_seed" ]] && { [[ ! "$placement_seed" =~ ^[0-9]+$ ]] || (( placement_seed < 1 || placement_seed > 999999 )); }; then
+  echo "READPATH_GPL_SEED must be a positive integer <= 999999" >&2; exit 2
+fi
+if [[ "$placement_only" != 0 && "$placement_only" != 1 ]]; then
+  echo "READPATH_STOP_AFTER_PLACEMENT must be 0 or 1" >&2; exit 2
+fi
+if [[ "$placement_only" == 1 && -z "$placement_seed" ]]; then
+  echo "Placement-only runs require explicit READPATH_GPL_SEED" >&2; exit 2
+fi
 if (( width < 1 || depth < 2 || (depth & (depth - 1)) != 0 )); then
   echo "Width must be positive and depth a power of two >= 2" >&2; exit 2
 fi
@@ -19,14 +31,20 @@ image="${ORFS_IMAGE:?Provide digest-pinned Docker image as ORFS_IMAGE}"
 case "$image" in *@sha256:*) ;; *) echo "ORFS_IMAGE must use a sha256 digest" >&2; exit 2 ;; esac
 flow="$orfs_root/flow"
 test -f "$flow/Makefile"
-out="$repo_root/research-pilot-reports/openroad_${width}x${depth}_${geometry}"
-variant="readpath-${geometry}-v1"
+seed_suffix=""
+if [[ -n "$placement_seed" ]]; then seed_suffix="_seed${placement_seed}"; fi
+out="$repo_root/research-pilot-reports/openroad_${width}x${depth}_${geometry}${seed_suffix}"
+variant="readpath-${geometry}${seed_suffix}-v1"
 mkdir -p "$out"
+printf '%s\n' "${placement_seed:-historical-default}" > "$out/global-placement-seed.txt"
 src="$flow/designs/src/research_readpath"
 mkdir -p "$src"
 cp "$repo_root/rtl/fifo_sync.v" "$src/baseline.v"
 cp "$repo_root/research/readpath/rtl/fifo_sync_onehot.v" "$src/decoder.v"
 cp "$repo_root/research/readpath/scripts/readpath_sta.tcl" "$flow/scripts/research_readpath_sta.tcl"
+if [[ -n "$placement_seed" ]]; then
+  cp "$repo_root/research/readpath/scripts/placement_signature.tcl" "$flow/scripts/research_readpath_placement_signature.tcl"
+fi
 
 git -C "$repo_root" rev-parse HEAD > "$out/research-commit.txt"
 git -C "$orfs_root" rev-parse HEAD > "$out/orfs-commit.txt"
@@ -104,6 +122,10 @@ EOF
   if [[ "$geometry" == natural ]]; then
     printf 'export CORE_UTILIZATION = 40\n' >> "$cfg_dir/config.mk"
   fi
+  if [[ -n "$placement_seed" ]]; then
+    # Pinned upstream global_place.tcl passes this to -random_seed.
+    printf 'export GPL_RANDOM_SEED = %s\n' "$placement_seed" >> "$cfg_dir/config.mk"
+  fi
   for dir in results logs reports objects; do
     mkdir -p "$flow/$dir/nangate45/$nickname/$variant"
   done
@@ -153,9 +175,36 @@ fi
 for arch in baseline decoder; do
   nickname="readpath_${width}x${depth}_${arch}"
   base="nangate45/$nickname/$variant"
-  for stage in floorplan place cts grt route finish; do
+  stages=(floorplan place cts grt route finish)
+  if [[ "$placement_only" == 1 ]]; then stages=(floorplan place); fi
+  for stage in "${stages[@]}"; do
     run_stage "$arch" "$stage"
+    if [[ "$stage" == place && -n "$placement_seed" ]]; then
+      # Hash the exact placed instance coordinates and orientations. Never
+      # upload or retain the plaintext coordinate list from this check.
+      sig="$out/${arch}_placed-coordinates.tmp"
+      if ! docker run --rm --user "$(id -u):$(id -g)" \
+        -v "$flow:/OpenROAD-flow-scripts/flow" \
+        -v "$out:/readpath-private-output" \
+        -w /OpenROAD-flow-scripts/flow \
+        -e READPATH_PLACE_DB="/OpenROAD-flow-scripts/flow/results/$base/3_3_place_gp.odb" \
+        -e READPATH_PLACE_LIST="/readpath-private-output/${arch}_placed-coordinates.tmp" \
+        "$image" bash -lc 'source ../env.sh && openroad -exit ./scripts/research_readpath_placement_signature.tcl' \
+        > "$out/${arch}_placement.console.log" 2>&1; then
+        tail -n 100 "$out/${arch}_placement.console.log" >&2
+        rm -f "$sig"
+        exit 1
+      fi
+      test -s "$sig"
+      sha256sum "$sig" | awk '{print $1}' > "$out/${arch}_placement-sha256.txt"
+      rm -f "$sig"
+      echo "Placement fingerprint $arch seed $placement_seed: $(cat "$out/${arch}_placement-sha256.txt")"
+    fi
   done
+  if [[ "$placement_only" == 1 ]]; then
+    echo "PLACEMENT GATE ONLY: $arch complete"
+    continue
+  fi
 
   rpt="$flow/reports/$base"
   logs="$flow/logs/$base"
@@ -195,6 +244,11 @@ for arch in baseline decoder; do
   python3 "$repo_root/research/readpath/scripts/summarize_openroad.py" summarize \
     "$out" "$arch" "$width" "$depth" "$geometry"
 done
+
+if [[ "$placement_only" == 1 ]]; then
+  echo "PLACEMENT GATE COMPLETE: ${width}x${depth} $geometry seed $placement_seed"
+  exit 0
+fi
 
 python3 "$repo_root/research/readpath/scripts/summarize_openroad.py" compare \
   "$out/baseline_summary.json" "$out/decoder_summary.json" "$out/comparison.json"

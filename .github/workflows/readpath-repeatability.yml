@@ -1,0 +1,184 @@
+name: FIFO read-path repeatability — controlled placement seeds
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/readpath-repeatability.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readpath-repeatability-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ORFS_REV: d056a2b304182bf76ff10653531165b1dd9848d4
+  ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+  ORFS_ROOT: /tmp/openroad-research-orfs
+
+jobs:
+  placement-probe:
+    name: Seed verification 8x16 matched / seed ${{ matrix.seed }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        seed: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned OpenROAD
+        run: |
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          git -C "$ORFS_ROOT" rev-parse HEAD
+      - name: Generate placement fingerprints (no full routing)
+        env:
+          READPATH_GPL_SEED: ${{ matrix.seed }}
+          READPATH_STOP_AFTER_PLACEMENT: "1"
+        run: bash research/readpath/scripts/run_openroad_comparison.sh 8 16 matched
+      - name: Upload hashes and console logs only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-probe-s${{ matrix.seed }}-${{ github.run_id }}
+          path: |
+            research-pilot-reports/**/baseline_placement-sha256.txt
+            research-pilot-reports/**/decoder_placement-sha256.txt
+            research-pilot-reports/**/global-placement-seed.txt
+            research-pilot-reports/**/*placement.console.log
+          retention-days: 90
+          if-no-files-found: warn
+
+  check-placement:
+    name: Verify distinct physical placements for different seeds
+    runs-on: ubuntu-24.04
+    needs: placement-probe
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: placement-probe-*-${{ github.run_id }}
+          path: probes
+      - name: Compare actual cell placement fingerprints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path("probes")
+          for arch in ("baseline","decoder"):
+              hashes=[]
+              for seed in (1,2):
+                  matches=list(root.glob(f"placement-probe-s{seed}-*/**/{arch}_placement-sha256.txt"))
+                  if len(matches)!=1:
+                      raise SystemExit(f"{arch} seed {seed}: expected one fingerprint; found {len(matches)}")
+                  x=matches[0].read_text().strip()
+                  if len(x)!=64: raise SystemExit("Invalid placement hash")
+                  hashes.append(x)
+              print(f"{arch}: seed1={hashes[0]} seed2={hashes[1]}")
+              if hashes[0]==hashes[1]:
+                  raise SystemExit(f"STOP: {arch} physical placement unchanged across seeds; no valid variability trial")
+          print("PASS: both architectures change placed standard-cell coordinates across seeds")
+          PY
+
+  paired:
+    name: ${{ matrix.width }}x${{ matrix.depth }} matched / seed ${{ matrix.seed }}
+    needs: check-placement
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {width: 8, depth: 16, seed: 1}
+          - {width: 8, depth: 16, seed: 2}
+          - {width: 8, depth: 16, seed: 3}
+          - {width: 8, depth: 16, seed: 4}
+          - {width: 8, depth: 16, seed: 5}
+          - {width: 32, depth: 32, seed: 1}
+          - {width: 32, depth: 32, seed: 2}
+          - {width: 32, depth: 32, seed: 3}
+          - {width: 32, depth: 32, seed: 4}
+          - {width: 32, depth: 32, seed: 5}
+          - {width: 8, depth: 64, seed: 1}
+          - {width: 8, depth: 64, seed: 2}
+          - {width: 8, depth: 64, seed: 3}
+          - {width: 8, depth: 64, seed: 4}
+          - {width: 8, depth: 64, seed: 5}
+          - {width: 16, depth: 32, seed: 1}
+          - {width: 16, depth: 32, seed: 2}
+          - {width: 16, depth: 32, seed: 3}
+          - {width: 16, depth: 32, seed: 4}
+          - {width: 16, depth: 32, seed: 5}
+          - {width: 32, depth: 16, seed: 1}
+          - {width: 32, depth: 16, seed: 2}
+          - {width: 32, depth: 16, seed: 3}
+          - {width: 32, depth: 16, seed: 4}
+          - {width: 32, depth: 16, seed: 5}
+          - {width: 64, depth: 8, seed: 1}
+          - {width: 64, depth: 8, seed: 2}
+          - {width: 64, depth: 8, seed: 3}
+          - {width: 64, depth: 8, seed: 4}
+          - {width: 64, depth: 8, seed: 5}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned OpenROAD and Nangate45
+        run: |
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          echo "Pinned ORFS $(git -C "$ORFS_ROOT" rev-parse HEAD)"
+      - name: Verify independent FIFO behavior
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -g2012 -s fifo_readpath_equiv_tb \
+            -P fifo_readpath_equiv_tb.DATA_WIDTH=${{ matrix.width }} \
+            -P fifo_readpath_equiv_tb.DEPTH=${{ matrix.depth }} \
+            -o /tmp/paired.vvp rtl/fifo_sync.v \
+            research/readpath/rtl/fifo_sync_onehot.v \
+            research/readpath/tb/fifo_readpath_equiv_tb.v
+          vvp /tmp/paired.vvp
+      - name: Matched-core RTL-to-GDSII and extracted-SPEF STA
+        env:
+          READPATH_GPL_SEED: ${{ matrix.seed }}
+        run: |
+          bash research/readpath/scripts/run_openroad_comparison.sh \
+            ${{ matrix.width }} ${{ matrix.depth }} matched
+      - name: Preserve measurements and physical checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repeat-${{ matrix.width }}x${{ matrix.depth }}-s${{ matrix.seed }}-${{ github.run_id }}
+          path: research-pilot-reports/openroad_${{ matrix.width }}x${{ matrix.depth }}_matched_seed${{ matrix.seed }}/
+          retention-days: 90
+          if-no-files-found: warn
+
+  aggregate:
+    name: Summarize width, depth, seed means and variance
+    needs: paired
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download matched paired runs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: repeat-*-${{ github.run_id }}
+          path: collected
+      - name: Produce CSV, JSON, and Markdown analyses
+        run: python3 research/readpath/scripts/aggregate_repeatability.py collected repeat-summary
+      - name: Archive report even if some experiments fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repeat-summary-${{ github.run_id }}
+          path: repeat-summary/
+          retention-days: 90
+          if-no-files-found: warn
