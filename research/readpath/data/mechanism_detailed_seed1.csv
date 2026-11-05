@@ -1,0 +1,5 @@
+fifo,architecture,read_delay_ns,cell_delay_ns,net_delay_ns,net_fraction_pct,seed
+8x32,baseline,0.7326,0.7171,0.0154,2.1,1
+8x32,decoder,0.5383,0.5343,0.0039,0.7,1
+64x32,baseline,0.8703,0.8279,0.0424,4.9,1
+64x32,decoder,0.7606,0.7379,0.0227,3.0,1

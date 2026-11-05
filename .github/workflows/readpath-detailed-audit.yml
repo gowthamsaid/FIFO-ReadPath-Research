@@ -3,7 +3,9 @@ name: Archived FIFO read-path detailed cell/net STA
 on:
   push:
     branches: [main]
-    paths: [".github/workflows/readpath-detailed-audit.yml"]
+    paths:
+      - ".github/workflows/readpath-detailed-audit.yml"
+      - "research/readpath/scripts/parse_detailed_sta.py"
   workflow_dispatch:
 
 permissions:

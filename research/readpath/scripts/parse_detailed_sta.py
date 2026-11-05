@@ -10,8 +10,8 @@ def parse(txt,old,cfg,arch):
         x=re.search(pattern,t,re.M)
         if x is None: raise ValueError('Missing '+label)
         return x.group(1).strip()
-    start=get(r'^Startpoint:\s*(.+)$','startpoint')
-    end=get(r'^Endpoint:\s*(.+)$','endpoint')
+    start=get(r'^Startpoint:\s*(.+)$','startpoint').split(' (',1)[0]
+    end=get(r'^Endpoint:\s*(.+)$','endpoint').split(' (',1)[0]
     arrival=float(get(r'^\s*([+-]?\d+\.\d+)\s+data arrival time\s*$','arrival'))
     slack=float(get(r'^\s*([+-]?\d+\.\d+)\s+slack\s+\((?:MET|VIOLATED)\)','slack'))
     if start != old['startpoint'] or end != old['endpoint']: raise ValueError('Path endpoints mismatch')
