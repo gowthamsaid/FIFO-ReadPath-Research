@@ -28,12 +28,13 @@ This research repository contains the *additional* implementation, controls, scr
 
 ## Start here — research evidence
 
-1. **[Research evolution and decisions](research/readpath/RESULTS_AND_DECISIONS.md)** — chronological hypotheses, observations, incomplete selective sharing proposal, and next direction.
-2. **[Research experiments and interpretation](research/readpath/README.md)** — setup, functional checks, synthesis, and experiment history.
-3. **[Mechanism-first decision protocol](research/readpath/MECHANISM_AUDIT.md)** — explicit go/no-go criteria *before* building a partial decoder.
-4. **[Measured detailed cell/net audit](research/readpath/MECHANISM_DETAILED_SEED1.md)** and [CSV](research/readpath/data/mechanism_detailed_seed1.csv) — actual routed ODB/SDC/SPEF path decomposition.
-5. **[Evidence and Actions index](research/readpath/EVIDENCE_INDEX.md)** — original successful runs, artifact names, and provenance.
-6. **[Shared decoder RTL](research/readpath/rtl/fifo_sync_onehot.v)** and [independent queue-model comparison testbench](research/readpath/tb/fifo_readpath_equiv_tb.v).
+1. **[Negative results, failed gates, and open items](research/readpath/NEGATIVE_RESULTS_AND_OPEN_ITEMS.md)** — scientific failures, unresolved tests and engineering-run distinctions.
+3. **[Research evolution and decisions](research/readpath/RESULTS_AND_DECISIONS.md)** — chronological hypotheses, observations, incomplete selective sharing proposal, and next direction.
+3. **[Research experiments and interpretation](research/readpath/README.md)** — setup, functional checks, synthesis, and experiment history.
+4. **[Mechanism-first decision protocol](research/readpath/MECHANISM_AUDIT.md)** — explicit go/no-go criteria *before* building a partial decoder.
+5. **[Measured detailed cell/net audit](research/readpath/MECHANISM_DETAILED_SEED1.md)** and [CSV](research/readpath/data/mechanism_detailed_seed1.csv) — actual routed ODB/SDC/SPEF path decomposition.
+6. **[Evidence and Actions index](research/readpath/EVIDENCE_INDEX.md)** — original successful runs, artifact names, and provenance.
+7. **[Shared decoder RTL](research/readpath/rtl/fifo_sync_onehot.v)** and [independent queue-model comparison testbench](research/readpath/tb/fifo_readpath_equiv_tb.v).
 
 ## Repository map
 
