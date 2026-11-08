@@ -15,6 +15,8 @@ case "$mode" in baseline|decoder) ;; *) echo "Unsupported architecture: $mode" >
 case "$stage" in preflight|synth|floorplan|place|cts|grt|route|finish) ;; *) echo "Unsupported stage: $stage" >&2; exit 2;; esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# Restore verified baseline from the public implementation without tracking it here.
+bash "$root/research/readpath/scripts/fetch_public_baseline.sh"
 orfs="${OPENROAD_FLOW_ROOT:-}"
 if [[ -z "$orfs" || ! -f "$orfs/flow/Makefile" ]]; then
   echo "Set OPENROAD_FLOW_ROOT to an existing OpenROAD-flow-scripts checkout (parent directory of flow/)" >&2

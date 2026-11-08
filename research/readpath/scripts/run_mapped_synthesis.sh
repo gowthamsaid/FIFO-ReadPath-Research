@@ -16,6 +16,8 @@ if ! [[ "$width" =~ ^[0-9]+$ && "$depth" =~ ^[0-9]+$ ]] || (( width < 1 || depth
 fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# Restore verified baseline from the public implementation without tracking it here.
+bash "$repo_root/research/readpath/scripts/fetch_public_baseline.sh"
 cd "$repo_root"
 
 # Pin the ORFS revision so the same Nangate45 liberty snapshot is used.

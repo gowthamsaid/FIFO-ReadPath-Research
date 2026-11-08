@@ -43,6 +43,8 @@ jobs:
     steps:
       - name: Check out research branch
         uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
 
       - name: Prepare pinned ORFS revision and Docker image
         run: |

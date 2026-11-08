@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "research/readpath/scripts/run_mapped_synthesis.sh"
+      - "research/readpath/scripts/fetch_public_baseline.sh"
       - ".github/workflows/readpath-mapped.yml"
   workflow_dispatch:
 

@@ -1,3 +1,7 @@
+# Read-path research: experiment log and reproduction notes
+
+> **Research status:** The original pilot grew into 50 paired physical comparisons and a detailed mechanism audit. Earlier work-in-progress language below is historical; for current findings and the decision **not** to implement partial decoder sharing, start with [RESULTS_AND_DECISIONS.md](RESULTS_AND_DECISIONS.md) and the [repository overview](../../README.md).
+
 # Read-path research pilot (separate from the M.S. technical paper)
 
 ## Motivation: direct evidence from October 11, 2026 routed results
