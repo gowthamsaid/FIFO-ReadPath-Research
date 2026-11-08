@@ -1,6 +1,6 @@
 # FIFO read-path research — methods, studies, and archive
 
-This document explains the **experimental approach** in the private FIFO read-path research repository. Begin with the [research overview](../../README.md), [results and decisions](RESULTS_AND_DECISIONS.md), or [evidence index](EVIDENCE_INDEX.md) for the current scientific conclusions.
+This document explains the **experimental approach** in the private FIFO read-path research repository. Begin with the [research overview](../../README.md), [negative-results ledger](NEGATIVE_RESULTS_AND_OPEN_ITEMS.md), [results and decisions](RESULTS_AND_DECISIONS.md), or [evidence index](EVIDENCE_INDEX.md) for the current scientific conclusions.
 
 ## Motivation and original baseline
 
