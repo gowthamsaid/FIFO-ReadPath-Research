@@ -1,141 +1,58 @@
-# Read-path research: experiment log and reproduction notes
+# FIFO read-path research — methods, studies, and archive
 
-> **Research status:** The original pilot grew into 50 paired physical comparisons and a detailed mechanism audit. Earlier work-in-progress language below is historical; for current findings and the decision **not** to implement partial decoder sharing, start with [RESULTS_AND_DECISIONS.md](RESULTS_AND_DECISIONS.md) and the [repository overview](../../README.md).
+This document explains the **experimental approach** in the private FIFO read-path research repository. Begin with the [research overview](../../README.md), [results and decisions](RESULTS_AND_DECISIONS.md), or [evidence index](EVIDENCE_INDEX.md) for the current scientific conclusions.
 
-# Read-path research pilot (separate from the M.S. technical paper)
+## Motivation and original baseline
 
-## Motivation: direct evidence from October 11, 2026 routed results
+The [completed public FIFO designs](https://github.com/gowthamsaid/FIFO-RTL-to-GDS) include 8×16 and 32×32 synchronous FIFOs, each meeting the recorded 2 ns setup constraint. The original timing reports showed paths through read-pointer-driven selection logic, providing a performance question without an existing timing violation:
 
-- At 8-bit x 16-entry: worst **setup** path `read_ptr[2]` to `data_out[3]`,
-  arrival 0.78 ns, setup slack +1.28643 ns.
-- At 32-bit x 32-entry: worst **setup** path `read_ptr[2]` to `data_out[6]`,
-  arrival 0.92 ns, setup slack +1.20585 ns.
-- Both contain buffered high-fanout read-pointer logic and read-selection cells.
-- **Neither baseline violates the 2 ns constraint.** We are investigating the
-  cost and performance of the read path, not repairing an existing violation.
+- [8×16 archived timing report](https://github.com/gowthamsaid/FIFO-RTL-to-GDS/blob/main/reports/fifo_8x16/final_timing.rpt)
+- [32×32 archived timing report](https://github.com/gowthamsaid/FIFO-RTL-to-GDS/blob/main/reports/fifo_32x32/final_timing.rpt)
 
-Source: `reports/fifo_8x16/final_timing.rpt` and
-`reports/fifo_32x32/final_timing.rpt`.
+This repository does not replicate the original RTL, reports, GDSII layouts or portfolio documentation.
 
-## Proposed falsifiable question
+## Falsifiable architecture hypothesis
 
-For a flip-flop-based synchronous FIFO using the same interface, write
-semantics, technology library, and constraints, **when does shared read-address
-decoding (one-hot/AND-OR) outperform an indexed memory read (synthesis inferred
-mux) in post-route critical-path delay, and what area/routing/fanout cost
-does it impose?**
+**H1:** A fully shared one-hot read decoder may reduce targeted routed read-path delay and mapped area relative to an indexed read for some width/depth combinations.
 
-### H1 (not yet established)
-The shared decoder may reduce the fanout-driven read-pointer delay for some
-(width, depth) combinations by sharing comparisons across data bits.
+**Competing explanation:** Technology mapping, buffered fanout, physical congestion or path migration can outweigh or explain the observed differences. Targeted read-path timing and whole-design critical timing must be reported independently.
 
-### Competing hypothesis H0
-Technology mapping may collapse the two RTL variants into comparable or
-identical gate structures, or added one-hot fanout/routing may cancel timing
-benefits. The alternative could be slower and larger.
+**Tested:** The unchanged baseline FIFO is restored at a pinned upstream commit with `bash research/readpath/scripts/fetch_public_baseline.sh`. The research decoder is [`rtl/fifo_sync_onehot.v`](rtl/fifo_sync_onehot.v). Both are checked against the [independent queue-model testbench](tb/fifo_readpath_equiv_tb.v) using directed simulation, not formal FIFO equivalence.
 
-## First-stage gate: avoid wasting weeks
+## Experiments and measured evidence
 
-1. Verify cycle-accurate equivalence against an independent queue model.
-   This is a deterministic **simulation check, not formal proof**.
-2. Generic synthesize both with exactly the same Yosys version, options,
-   configuration, and stimulus-independent assumptions.
-3. Inspect mapped/structural logic: mux, comparators, AND/OR elements,
-   fanout and logic depth. Generic cell count is **not** standard-cell area.
-4. **Only if structurally distinct**, advance to matched Nangate45 technology
-   mapping and matched OpenROAD placement/routing. The original ORFS
-   environment must be reproducibly reconstructed or documented.
-5. Confirm read selection is the critical path in each new run. Compare
-   the *actual routed path delay*, per-instance STA path detail, buffering,
-   area, congestion, and routing metrics—not simply an Fmax headline.
-6. Perform matched repeat runs if tool placement differs, report all results,
-   including failures, without cherry-picking best-case layouts.
+1. **Initial simulation and generic synthesis:** Six width/depth configurations. Validate FIFO function before comparing gate counts.
+2. **Mapped Nangate45 synthesis:** Same Liberty corner and mapping commands, with technology-mapped cell-area comparisons for 8×16, 32×32, 8×64 and 32×16.
+3. **Matched physical implementations:** Same timing intent, library, dimensions/geometry within pairs, and repeatable flow. Examine extracted-SPEF read paths in addition to overall setup timing.
+4. **Repeatability:** [30 routed pairs in five-seed study](https://github.com/gowthamsaid/FIFO-ReadPath-Research/actions/runs/41941967871).
+5. **Width/depth effects:** [20 additional routed pairs](https://github.com/gowthamsaid/FIFO-ReadPath-Research/actions/runs/41954769170) and [cross-run comparison](https://github.com/gowthamsaid/FIFO-ReadPath-Research/actions/runs/41964695467).
+6. **Physical mechanism:** [Preliminary stage/output-pin study](MECHANISM_SEED1_PRELIMINARY.md), followed by [input-pin-inclusive SPEF cell/net decomposition](MECHANISM_DETAILED_SEED1.md).
 
-## Primary controlled configurations
+The complete outcome, including percentage improvements and the unimplemented partial-sharing proposal, is in [RESULTS_AND_DECISIONS.md](RESULTS_AND_DECISIONS.md).
 
-- 8x16 and 32x32: historical anchors.
-- Equal-storage family: 8x64, 16x32, 32x16, 64x8 (512 bits each).
-- Compare **architecture A vs B within each identical size**.
-  Different widths have different I/O widths, so equal storage capacity alone
-  is not a fair architecture comparison *between* configurations.
+## Selective (partial) decoding: proposal only
 
-## Interpretation and stop criteria
+Based on variable benefits across widths, we considered two-group and four-group selective sharing. Before implementing them, the [mechanism-first protocol](MECHANISM_AUDIT.md) required evidence that shared decoder select distribution was a dominant, physically actionable bottleneck. Selected detailed STA paths were **mostly cell arc delay**, not select-net wire delay. The proposed mechanism did not clear the gate, and **neither two- nor four-group decoder designs were implemented or evaluated**.
 
-- If Yosys makes essentially the same netlist, **stop and change the question**:
-  architecture names alone do not establish different hardware.
-- If distinctive netlists exist but post-route measurements are inconsistent
-  or improvements fall within run-to-run variability, report a null result and
-  do not claim superiority.
-- If one architecture improves read-path delay, quantify the tradeoff in
-  cell area, wiring, buffering, power assumptions, and setup/hold margins.
-- Literature and prior-art review are required **before publication claims**.
-  One-hot decoders, mux structures, and FIFO optimizations are established
-  concepts. This pilot does not claim to invent any of them.
-- This pilot is separate from the already-complete 8x16 vs 32x32 technical
-  paper, so an inconclusive hypothesis must not delay degree completion.
+The resulting revised research question, tested independently in a [separate ORRAM repo](https://github.com/gowthamsaid/ORRAM-Context-Aware-Memory-Research), concerns how *external address-generation timing* affects physical preference between existing RAM decoders.
 
-## Running the pilot
+## How to rerun the research
 
-GitHub Actions `Research pilot — FIFO read-path architecture` performs
-six-config differential RTL simulation and Yosys generic synthesis.
-To run locally, install `iverilog`, `vvp`, and `yosys`, then use the
-commands in `.github/workflows/readpath-pilot.yml`.
+The current workflows and research scripts restore the original public FIFO baseline from its pinned commit and verify its Git blob hash. `rtl/fifo_sync.v` is generated/ignored, not tracked in this repo.
 
-Artifacts from the workflow are generic synthesis logs; there is **no claim
-that physical design, routed timing, formal equivalence, or publication-level
-novelty has been established by these jobs**.
+```bash
+bash research/readpath/scripts/fetch_public_baseline.sh
+bash research/readpath/scripts/run_mapped_synthesis.sh 8 16
+```
 
-## Stage 2: Nangate45 mapped-synthesis pilot
+The first command requires Git/network access; mapped synthesis also needs Yosys and curl.
 
-A separate GitHub Actions workflow, `Research pilot — Nangate45 mapped synthesis`,
-runs `research/readpath/scripts/run_mapped_synthesis.sh` on 8x16, 32x32,
-8x64, and 32x16. It downloads a Nangate45 **typical-corner** Liberty file
-from pinned upstream ORFS commit
-`d056a2b304182bf76ff10653531165b1dd9848d4`.
-The workflow records the library SHA-256 hash and Yosys version, then performs
-identical synthesis, standard-cell flip-flop mapping and ABC logic mapping
-for both architectures. Netlists, complete logs, and `stat -liberty`
-area statistics are retained as CI artifacts.
+For local ORFS experiments, see [the stage-by-stage guide](ROUTED_EXPERIMENT_GUIDE.md), which requires a working version-compatible OpenROAD-flow-scripts installation. For controlled cloud physical experiments, inspect [`readpath-repeatability.yml`](../../.github/workflows/readpath-repeatability.yml) and [`readpath-width-depth.yml`](../../.github/workflows/readpath-width-depth.yml). The [evidence index](EVIDENCE_INDEX.md) is the easiest way to inspect successful runs rather than rerun them.
 
-**This cannot establish timing benefit.** It evaluates mapped gate types
-and estimated library cell area before any floorplan, clock tree, wire
-parasitics, or timing constraints. We will proceed to a controlled OpenROAD
-run only after the mapped outputs are inspected and the research hypothesis
-remains worth testing.
+## Scope, history, and limitations
 
-## Initial mapped-synthesis result — 2026-11-04
-
-[GitHub Actions mapped-synthesis run](https://github.com/gowthamsaid/FIFO-RTL-to-GDS/actions/runs/41872480609)
-completed successfully on all four configurations. Using the same
-pinned Nangate45 typical-corner Liberty and Yosys mapping commands:
-
-| FIFO | Baseline mapped cells | Decoder mapped cells | Baseline library area (µm²) | Decoder library area (µm²) | Area change |
-|---|---:|---:|---:|---:|---:|
-| 8×16 | 495 | 503 | 1197.000 | 1164.282 | −2.7% |
-| 32×16 | 1961 | 1537 | 4479.440 | 4100.124 | −8.5% |
-| 8×64 | 2030 | 1717 | 4514.020 | 4144.546 | −8.2% |
-| 32×32 | 3797 | 2980 | 8702.190 | 7907.648 | −9.1% |
-
-These `stat -liberty` estimates are **mapped-cell areas only**, not
-placed/routed design area, and no path-delay comparison has yet been run.
-They are not directly comparable with previously archived post-route
-OpenROAD results, which reflect the separate original implementation
-flow. Both variants must undergo consistent backend implementation
-and STA before timing conclusions or an area/timing tradeoff can be made.
-
-**Interpretation:** Even though decoder generic synthesis contained
-more primitive logic cells, technology mapping reduced library cell area
-at all four tested sizes. This supports progressing to a controlled
-physical-design pilot; it does **not** establish H1, H2, or post-route
-timing benefit. Keep power, delay, and congestion claims provisional.
-
-
-## Stage 3: matched routed read-path timing (in progress)
-
-[GitHub Actions post-route comparison](https://github.com/gowthamsaid/FIFO-RTL-to-GDS/actions/workflows/readpath-openroad.yml) tests 8x16 and 32x32 in separate jobs. The workflow uses the pinned ORFS source revision stated above and records the fetched `openroad/orfs:latest` Docker image ID/digest at runtime; the image tag itself is mutable and must not be treated as a fully pinned tool version. Any future cross-run comparisons must hold the recorded digest fixed.
-
-The two variants use the same Nangate45 platform, 2 ns clock, 0.2 ns input/output delays, 40% target utilization, 0.60 place density, tool image, implementation scripts, and depth/width. They go through placement, CTS, routing, extracted-parasitic STA when SPEF is available, and final metrics. The intended distinguishing variable is the read-selection RTL.
-
-Artifacts contain both final metrics and path reports, including the constrained `read_ptr` register to `data_out` register setup path. `data arrival time` includes launch-clock insertion, so it is not by itself a pure clock-to-Q-plus-combinational delay. Target-path **setup slack** and path cell/net detail should be used alongside identical clock settings, and critical-path migration must be documented. A reduction in mapped cell area does not guarantee an improvement in read-path timing.
-
-**Status:** workflow created and first run queued on November 4, 2026. Post-route timing measurements have not yet been validated; implementation failures are diagnostic, not null scientific results. Before presenting this as publishable evidence, inspect the generated reports, verify parasitic extraction, repeat for multiple settings/seeds, and check prior art.
+- Mapped area is not post-route cell/core area; targeted read-path gains do not necessarily imply overall Fmax gains.
+- Historical early pilot runs were made with natural and matched floorplan choices. Do not directly compare original October portfolio results with new paired research variants.
+- Early cloud-versus-local WSL wire-length tolerance mismatch was not resolved; do not present the old comparison as a passed reproduction gate.
+- No universal performance or signoff claim is made. The physical timing mechanism audit covers selected paths under the available Nangate45 conditions.
+- Previous interpretations and incomplete hypotheses are retained in the archived mechanism reports and Git history, rather than rewritten as successful results.
