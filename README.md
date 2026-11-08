@@ -28,7 +28,8 @@ This research repository contains the *additional* implementation, controls, scr
 
 ## Start here — research evidence
 
-1. **[Research evolution and decisions](research/readpath/RESULTS_AND_DECISIONS.md)** — chronological hypotheses, observations, incomplete selective sharing proposal, and next direction.
+1. **[Negative results, failed gates, and open items](research/readpath/NEGATIVE_RESULTS_AND_OPEN_ITEMS.md)** — scientific failures, unresolved tests and engineering-run distinctions.
+2. **[Research evolution and decisions](research/readpath/RESULTS_AND_DECISIONS.md)** — chronological hypotheses, observations, incomplete selective sharing proposal, and next direction.
 2. **[Research experiments and interpretation](research/readpath/README.md)** — setup, functional checks, synthesis, and experiment history.
 3. **[Mechanism-first decision protocol](research/readpath/MECHANISM_AUDIT.md)** — explicit go/no-go criteria *before* building a partial decoder.
 4. **[Measured detailed cell/net audit](research/readpath/MECHANISM_DETAILED_SEED1.md)** and [CSV](research/readpath/data/mechanism_detailed_seed1.csv) — actual routed ODB/SDC/SPEF path decomposition.
