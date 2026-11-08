@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "research/readpath/scripts/run_openroad_comparison.sh"
+      - "research/readpath/scripts/fetch_public_baseline.sh"
       - "research/readpath/scripts/readpath_sta.tcl"
       - "research/readpath/scripts/summarize_openroad.py"
       - ".github/workflows/readpath-openroad.yml"
@@ -33,13 +34,14 @@ jobs:
           git -C /tmp/orfs rev-parse HEAD
       - name: Pull and identify OpenROAD flow toolchain
         run: |
-          docker pull openroad/orfs:latest
-          docker image inspect openroad/orfs:latest --format '{{.Id}} {{json .RepoDigests}}'
+          docker pull openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+          docker image inspect openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9 --format '{{.Id}} {{json .RepoDigests}}'
       - name: Run matched baseline versus decoder through full route and STA
         env:
           ORFS_ROOT: /tmp/orfs
+          ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
         run: |
-          bash research/readpath/scripts/run_openroad_comparison.sh ${{ matrix.width }} ${{ matrix.depth }}
+          bash research/readpath/scripts/run_openroad_comparison.sh ${{ matrix.width }} ${{ matrix.depth }} natural
       - name: Archive research timing evidence
         if: always()
         uses: actions/upload-artifact@v4

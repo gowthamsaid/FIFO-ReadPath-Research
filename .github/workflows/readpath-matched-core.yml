@@ -33,6 +33,8 @@ jobs:
           - {width: 32, depth: 32}
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Install pinned ORFS and OpenROAD toolchain
         run: |
           git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
@@ -72,6 +74,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Download paired reports (including incomplete runs)
         uses: actions/download-artifact@v4
         with:

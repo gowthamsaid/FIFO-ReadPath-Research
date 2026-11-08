@@ -1,7 +1,6 @@
 # Routed read-path experiment — stage-by-stage operating guide
 
-This research work lives on `research/readpath-pilot-nov2026`, **not** the main
-recruiter portfolio branch.
+This guide describes the local, sequential ORFS procedure used for the research study. The completed research now resides in the private `FIFO-ReadPath-Research` repository, **separate from the public FIFO portfolio**. The original baseline RTL is fetched from a pinned public commit when a research run starts. Historical branch paths below have been updated to use this research repository.
 
 ## Study design
 
@@ -23,15 +22,12 @@ The existing October 2026 routed FIFO results are historical evidence,
 Open a WSL/Linux shell. Obtain the current branch:
 
 ```bash
-git clone https://github.com/gowthamsaid/FIFO-RTL-to-GDS.git
-cd FIFO-RTL-to-GDS
-git fetch origin
-git switch --track origin/research/readpath-pilot-nov2026
+git clone https://github.com/gowthamsaid/FIFO-ReadPath-Research.git
+cd FIFO-ReadPath-Research
+bash research/readpath/scripts/fetch_public_baseline.sh
 ```
 
-If already cloned, use `git fetch origin` and
-`git switch research/readpath-pilot-nov2026` (or create the tracking branch
-as above if absent). Do not overwrite unsaved local changes.
+If already cloned, update it with `git pull --ff-only` and then run `bash research/readpath/scripts/fetch_public_baseline.sh`. The baseline helper checks the pinned public Git blob and refuses to overwrite any mismatched existing baseline file. Do not discard local changes.
 
 Set the ORFS checkout path to your **existing, working** installation.
 `OPENROAD_FLOW_ROOT` must be the parent directory that contains `flow/`.
@@ -52,7 +48,7 @@ Nangate45 Liberty file alone does not pin the complete backend flow.
 
 ## Run 1: original 8×16
 
-From the **FIFO-RTL-to-GDS repository root**, execute one stage at a time:
+From the **private FIFO-ReadPath-Research repository root**, execute one stage at a time:
 
 ```bash
 bash research/readpath/scripts/run_orfs_stage.sh 8x16 baseline preflight
@@ -152,7 +148,10 @@ required time, and setup slack. Reconfirm both designs still meet hold.
 - Null result = legitimate outcome; never claim improved timing before routed STA.
 - Do not change the degree paper's completed 8×16/32×32 evidence.
 
-## Completion checklist
+## Historical stage-by-stage checklist
+
+> These checkboxes reflect the original manual operating guide and are not a claim that the later cloud results were incomplete. For verified finished multi-seed routed studies, see [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md).
+
 
 - [ ] 8×16 baseline preflight
 - [ ] 8×16 baseline all stages through finish

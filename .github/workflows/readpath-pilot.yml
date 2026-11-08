@@ -25,6 +25,8 @@ jobs:
           - {width: 64, depth: 8}
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Install Icarus Verilog
         run: sudo apt-get update && sudo apt-get install -y iverilog
       - name: Verify both architectures against FIFO reference model
@@ -52,6 +54,8 @@ jobs:
           - {width: 64, depth: 8}
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Install Yosys
         run: sudo apt-get update && sudo apt-get install -y yosys
       - name: Synthesize original and alternative architectures with identical Yosys flow

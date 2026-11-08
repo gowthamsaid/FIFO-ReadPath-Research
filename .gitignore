@@ -1,13 +1,15 @@
-# Simulation files
-sim/*.vvp
-sim/*.vcd
+# Public FIFO baseline is fetched on demand at a fixed upstream commit.
+# It is NOT a research-source duplicate.
+rtl/fifo_sync.v
+rtl/fifo_sync.v.tmp
 
-# Synthesis logs
-reports/*.log
-
-# Temporary files
+# Locally generated simulation, synthesis, physical outputs and test intermediates
+sim/
+research-pilot-reports/
+research/readpath/runs/
+*.vvp
+*.vcd
 *.swp
 *~
-
-# Locally generated ORFS research runs: raw logs, per-stage reports, metrics
-research/readpath/runs/
+__pycache__/
+*.pyc

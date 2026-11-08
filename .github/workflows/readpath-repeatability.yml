@@ -31,6 +31,8 @@ jobs:
         seed: [1, 2]
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Prepare pinned OpenROAD
         run: |
           git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
@@ -127,6 +129,8 @@ jobs:
           - {width: 64, depth: 8, seed: 5}
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Prepare pinned OpenROAD and Nangate45
         run: |
           git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
@@ -167,6 +171,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Restore pinned public FIFO baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
       - name: Download matched paired runs
         uses: actions/download-artifact@v4
         with:

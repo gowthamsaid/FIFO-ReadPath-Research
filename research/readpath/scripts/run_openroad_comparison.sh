@@ -26,6 +26,8 @@ fi
 case "$geometry" in natural|matched) ;; *) echo "Invalid geometry: $geometry" >&2; exit 2 ;; esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# Restore verified baseline from the public implementation without tracking it here.
+bash "$repo_root/research/readpath/scripts/fetch_public_baseline.sh"
 orfs_root="${ORFS_ROOT:?Provide pinned ORFS checkout as ORFS_ROOT}"
 image="${ORFS_IMAGE:?Provide digest-pinned Docker image as ORFS_IMAGE}"
 case "$image" in *@sha256:*) ;; *) echo "ORFS_IMAGE must use a sha256 digest" >&2; exit 2 ;; esac

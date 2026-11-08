@@ -1,97 +1,85 @@
-# Synchronous FIFO: RTL-to-GDSII Physical Design
+# FIFO Read-Path Research — Decoder Architecture and Physical Timing
 
-**Two configurations of one parameterized FIFO—8-bit × 16-entry and 32-bit × 32-entry—implemented through place-and-route and GDSII generation with Yosys, OpenROAD, and the Nangate45 platform.**
+**Independent research extension of [FIFO RTL-to-GDSII](https://github.com/gowthamsaid/FIFO-RTL-to-GDS), not a duplicate of the original implementation.**
 
-This project demonstrates the complete *educational* digital physical-design workflow: RTL design, directed functional verification, generic synthesis, standard-cell implementation, floorplanning, placement, clock-tree synthesis, routing, and post-route timing analysis. The goal is to compare how increasing both FIFO word width and depth changes implementation cost and timing.
+**Question:** For flip-flop-based synchronous FIFOs, when does an explicit, fully shared one-hot read decoder improve post-route read-path timing or standard-cell area compared with a synthesis-inferred indexed read? What physical mechanism explains the difference, and is selective (partial) decoder sharing justified?
 
-**Quick navigation:** [RTL](rtl/fifo_sync.v) · [Verification](tb/) · [Implementation setup](openroad/) · [Timing evidence](reports/) · [Final GDSII](layout/) · [Engineering notes](docs/engineering_notes.md)
+**Current status (November 2026):** Completed mapped-synthesis experiments, **50 paired routed comparisons** across repeatability and width/depth studies, and a detailed routed timing-mechanism audit. The full shared decoder improved *targeted* read-path timing in several measured configurations. The proposed **two-group and four-group selective decoders were not implemented**, because the suspected select-net routing bottleneck did not pass a mechanism-first feasibility gate. This result motivated a separate [ORRAM context-aware memory investigation](https://github.com/gowthamsaid/ORRAM-Context-Aware-Memory-Research). No publication novelty, universal speedup, or full signoff is claimed.
+
+## What changed from the public FIFO project?
+
+The [public repository](https://github.com/gowthamsaid/FIFO-RTL-to-GDS) owns the original parameterized `fifo_sync.v`, functional testbenches, 8×16 and 32×32 GDSII layouts, and the completed M.S. technical-paper implementation. **Those files are intentionally not duplicated here.**
+
+This research repository contains the *additional* implementation, controls, scripts, and evidence for comparing **indexed read** (original public RTL) with **fully shared one-hot read decoding** (`research/readpath/rtl/fifo_sync_onehot.v`). A pinned fetch helper restores the exact public baseline when an experiment is run; it is not tracked in this repository.
 
 ## Results at a glance
 
-| Metric | 8-bit × 16-entry | 32-bit × 32-entry |
-|---|---:|---:|
-| Stored data | 128 bits | 1,024 bits |
-| Clock period constraint | 2.00 ns | 2.00 ns |
-| Mapped standard cells¹ | 658 | 3,988 |
-| Standard-cell area¹ | 1,355.8 µm² | 9,216.1 µm² |
-| Core utilization¹ | 42.05% | 40.68% |
-| Worst reported **setup-path slack**² | +1.2864 ns | +1.2059 ns |
-| Worst reported **hold-path slack**² | +0.0920 ns | +0.0910 ns |
-| Setup / hold violation count² | 0 / 0 | 0 / 0 |
-| Setup TNS² | 0.00 ns | 0.00 ns |
-| Estimated minimum period² | 0.71 ns | 0.79 ns |
-| Estimated maximum frequency² | 1.401 GHz | 1.259 GHz |
+| Study | Verified observation | Interpretation |
+|---|---|---|
+| Nangate45 mapped synthesis | Decoder mapped library area lower by **2.7% (8×16), 8.5% (32×16), 8.2% (8×64), 9.1% (32×32)** | Mapped-cell estimates, not post-route area |
+| Matched repeatability | **30** paired routed trials (five physical seeds per configuration) | Checks placement repeatability, not independent production designs |
+| Width/depth expansion | **20** additional paired routed trials | Benefits depend on width and depth; some routing costs and critical-path migration |
+| Fixed depth 32 width study | Mean targeted read-path improvements: **23.311% (8×32), 18.310% (16×32), 14.097% (32×32), 11.131% (64×32)** | Trend for this tested family, not a universal scaling law |
+| Fixed width 32 depth study | Mean targeted improvements: **10.446% (32×8), 7.630% (32×16), 14.097% (32×32), 15.979% (32×64)** | Non-monotonic |
+| Detailed routed STA audit | For selected seed-1 8×32 and 64×32 paths, cell arcs account for about **95–99%** of measured read-path delay | Does **not** establish shared decoder select-net routing as the dominant bottleneck |
+| Partial sharing proposal | Two-/four-group architectures discussed but **not implemented or validated** | Mechanism-first gate did not justify another RTL architecture |
 
-**Takeaway:** An 8× increase in storage capacity was accompanied by approximately **6.8× cell area** and **6.1× cell count**. Both designs met the recorded 2 ns timing constraint at the reported analysis corner. Because both word width and depth increased, this comparison does not isolate either parameter's individual impact.
+**Important:** “Read-path improvement” refers to the specifically constrained read-pointer → registered-output path. It does **not** imply identical improvement in whole-design worst setup slack or Fmax. The paths compared across architectures may have different endpoints. The detailed delay split covers selected paths, not every decoder net.
 
-¹ Cell counts, area, and utilization are verified against the recovered, **original finish-stage JSON reports**: [8×16](reports/fifo_8x16/6_report.json) and [32×32](reports/fifo_32x32/6_report.json). The files were recovered byte-for-byte from the October 11, 2026 OpenROAD runs. The correct fields are `finish__design__instance__count__stdcell`, `finish__design__instance__area__stdcell`, and `finish__design__instance__utilization__stdcell`. See [measurement provenance](docs/engineering_notes.md#measurement-provenance).
+## Start here — research evidence
 
-² Full-precision worst-path slacks and the zero-violation counts come from those same [8×16 JSON](reports/fifo_8x16/6_report.json) and [32×32 JSON](reports/fifo_32x32/6_report.json) reports; compare with the original [8×16 STA report](reports/fifo_8x16/final_timing.rpt) and [32×32 STA report](reports/fifo_32x32/final_timing.rpt). The STA text reports print `wns max 0.00` when no negative-slack paths exist; **positive worst-path slack is not positive WNS**. Fmax is an STA estimate, not measured silicon speed.
-
-## Physical implementation
-
-### Final routed layouts — KLayout
-
-The two images below are **screenshots captured in KLayout from the original final routed GDSII files**. They show the full design view using visible layout layers; displayed colors and hatching depend on the viewer settings. These are implementation visuals, not DRC/LVS or other signoff evidence.
-
-| 8-bit × 16-entry FIFO | 32-bit × 32-entry FIFO |
-|:---:|:---:|
-| [![Final 8×16 FIFO physical layout in KLayout](docs/images/fifo_8x16_klayout.png)](docs/images/fifo_8x16_klayout.png) | [![Final 32×32 FIFO physical layout in KLayout](docs/images/fifo_32x32_klayout.png)](docs/images/fifo_32x32_klayout.png) |
-| 128 storage bits · 658 standard cells | 1,024 storage bits · 3,988 standard cells |
-
-The original GDSII files are available for independent inspection: [8×16](layout/fifo_8x16/fifo_8x16.gds) · [32×32](layout/fifo_32x32/fifo_32x32.gds). The PNG screenshots can be updated without changing this README by replacing the corresponding files in `docs/images/`.
-
-### Flow overview
-
-[![RTL-to-GDSII stage diagram](docs/flow_overview.svg)](docs/flow_overview.svg)
-
-The repository contains the **actual final GDSII outputs** for [8×16](layout/fifo_8x16/fifo_8x16.gds) and [32×32](layout/fifo_32x32/fifo_32x32.gds). Open them in KLayout to inspect the final physical layout. GDSII files cannot be previewed as ordinary images directly on GitHub.
-
-Use `python3 scripts/summarize_finish_metrics.py` to extract and check the two finish-stage reports. See the [evidence index](reports/README.md) for metric sources and caveats. The original final DEF and OpenDB files were recovered as well, but are kept out of the repository to avoid duplicating bulky generated artifacts; the GDSII files are already checked in.
-
-The physical flow targeted the [Nangate45](https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts) open platform with a 2.0 ns core clock and 0.2 ns simplified input/output delays. Details and limitations are in the [implementation notes](docs/engineering_notes.md).
-
-## Design and verification
-
-The design in [`rtl/fifo_sync.v`](rtl/fifo_sync.v) features:
-
-- Parameterized data width and depth, with **power-of-two depth** required by the pointer-wrap implementation.
-- One clock domain; active-high **synchronous reset** of pointers, occupancy counter, and output register.
-- Registered read output; storage synthesized as **flip-flop-based memory**, not an SRAM macro.
-- `full` / `empty` flags derived from occupancy.
-- A write is accepted when not full, or when a simultaneous read is accepted. A read requested while empty is rejected even if a write is requested in the same cycle.
-
-Three self-checking testbenches exercise basic ordering, full/empty boundaries, overflow/underflow protection, simultaneous read/write cases, and pointer wraparound. See [verification guide](docs/engineering_notes.md#verification-and-interface-semantics).
-
-### Run RTL tests
-
-Requirements: **Icarus Verilog** (`iverilog` and `vvp`) and Bash.
-
-```bash
-git clone https://github.com/gowthamsaid/FIFO-RTL-to-GDS.git
-cd FIFO-RTL-to-GDS
-bash scripts/run_rtl_tests.sh
-```
-
-The script tests the hard-coded 8×16 smoke test plus parameterized boundary and corner tests at **both configurations**. This is an RTL simulation workflow; it is **not** a one-command physical-design reproduction. The synthesis script and OpenROAD environment requirements are described in the [reproduction guide](docs/reproducibility.md).
+1. **[Research evolution and decisions](research/readpath/RESULTS_AND_DECISIONS.md)** — chronological hypotheses, observations, incomplete selective sharing proposal, and next direction.
+2. **[Research experiments and interpretation](research/readpath/README.md)** — setup, functional checks, synthesis, and experiment history.
+3. **[Mechanism-first decision protocol](research/readpath/MECHANISM_AUDIT.md)** — explicit go/no-go criteria *before* building a partial decoder.
+4. **[Measured detailed cell/net audit](research/readpath/MECHANISM_DETAILED_SEED1.md)** and [CSV](research/readpath/data/mechanism_detailed_seed1.csv) — actual routed ODB/SDC/SPEF path decomposition.
+5. **[Evidence and Actions index](research/readpath/EVIDENCE_INDEX.md)** — original successful runs, artifact names, and provenance.
+6. **[Shared decoder RTL](research/readpath/rtl/fifo_sync_onehot.v)** and [independent queue-model comparison testbench](research/readpath/tb/fifo_readpath_equiv_tb.v).
 
 ## Repository map
 
 ```text
-rtl/                   # Parameterized RTL (and small learning examples)
-tb/                    # Three FIFO self-checking testbenches
-scripts/               # Yosys scripts + RTL test runner
-openroad/fifo_8x16/    # Nangate45 implementation settings and SDC
-openroad/fifo_32x32/   # Larger configuration settings and SDC
-reports/               # Original finish-stage JSON, STA reports, synthesis, netlists
-layout/fifo_8x16/      # Final 8x16 GDSII
-layout/fifo_32x32/     # Final 32x32 GDSII
-docs/                  # Real KLayout screenshots, flow diagram, technical notes
-.github/workflows/     # RTL regression workflow
+README.md                         Research overview (this page)
+research/readpath/
+  rtl/fifo_sync_onehot.v          Research-only full shared-decoder RTL
+  tb/fifo_readpath_equiv_tb.v     Both implementations vs independent FIFO queue model
+  orfs/                           Research-specific paired OpenROAD configurations and SDC
+  scripts/                        Pinned baseline retrieval, experiment runners and STA parsers
+  data/                           Selected compact, path-level mechanism summaries
+  README.md                       Original pilot protocol and historical experimental progression
+  RESULTS_AND_DECISIONS.md        Current conclusions and selective-decoder decision
+  EVIDENCE_INDEX.md               Successful workflow runs and output provenance
+  MECHANISM_*.md                  Preliminary and detailed routed-path audits
+  ROUTED_EXPERIMENT_GUIDE.md      Stage-by-stage WSL/ORFS operating notes
+.github/workflows/readpath-*.yml  Research pilots, physical comparisons and analysis
 ```
 
-## Scope and limitations
+## Reproduce a functional comparison
 
-This is a **standard-cell educational implementation**, not a fabricated chip or tapeout. The reported post-route timing is from the available analysis corner and simplified timing constraints. No independent foundry-qualified DRC/LVS, multi-corner signoff, or EM/IR signoff is claimed. Final router checks and positive timing reports do **not** establish full signoff. See the precise [scope and evidence limitations](docs/engineering_notes.md#scope-and-limitations).
+Requirements: Git, Bash, Icarus Verilog (`iverilog`/`vvp`), network access to the public baseline repository. From the root of this research repository:
 
-**Author:** Gowtham Sai Damalacheruvu · M.S. Electrical & Computer Engineering, Rutgers University
+```bash
+bash research/readpath/scripts/fetch_public_baseline.sh
+iverilog -g2012 -s fifo_readpath_equiv_tb \
+  -P fifo_readpath_equiv_tb.DATA_WIDTH=8 \
+  -P fifo_readpath_equiv_tb.DEPTH=16 \
+  -o /tmp/readpath.vvp \
+  rtl/fifo_sync.v \
+  research/readpath/rtl/fifo_sync_onehot.v \
+  research/readpath/tb/fifo_readpath_equiv_tb.v
+vvp /tmp/readpath.vvp
+```
+
+The fetch helper pins the upstream **commit and blob hash**, and `rtl/fifo_sync.v` is intentionally gitignored. The two architectures must pass the reference-model tests; this is **directed functional verification, not formal equivalence proof**.
+
+For mapped-synthesis experiments (Yosys required), run `bash research/readpath/scripts/run_mapped_synthesis.sh 8 16`. For physical comparison, use the matched, digest-pinned ORFS runner `research/readpath/scripts/run_openroad_comparison.sh` with `WIDTH DEPTH natural|matched`, `ORFS_ROOT` and `ORFS_IMAGE` configured as in the [workflow](.github/workflows/readpath-width-depth.yml). The stage-by-stage `run_orfs_stage.sh` is an alternative requiring a compatible local ORFS checkout. Old workflow designs are preserved as a historical record; not all old cloud-to-WSL reproducibility checks are resolved.
+
+## Limitations and relation to subsequent research
+
+- The baseline and decoder are functionally compared using an independent queue-model simulation, not exhaustive formal FIFO equivalence.
+- Nangate45 timing and area are technology-, constraint-, and implementation-specific; no power, EM/IR, multi-corner signoff or fabrication was performed.
+- The detailed cell/net decomposition concerns *selected* routed paths and does not establish decoder-select net causality.
+- Partial/selective-sharing variants were **proposed only**; do not count them as implemented architectures.
+- Archived experiment outputs are held by GitHub Actions with finite retention. Selected derived CSVs and research conclusions are in the tracked source tree. [Run-index](research/readpath/EVIDENCE_INDEX.md) records where the original raw artifacts reside.
+- This is distinct from the [later ORRAM study](https://github.com/gowthamsaid/ORRAM-Context-Aware-Memory-Research), which investigates **existing** row-versus-word standard-cell RAM choices under different address-generation contexts.
+
+**Author:** Gowtham Sai Damalacheruvu · M.S. Electrical & Computer Engineering, Rutgers University.
