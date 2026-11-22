@@ -1,0 +1,142 @@
+name: Kruger study — five-seed completion for all 8–64 FIFOs
+
+on:
+  push:
+    branches: [research/kruger-scaling-power-2026]
+    paths:
+      - ".github/workflows/kruger-five-seed-completion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ORFS_REV: d056a2b304182bf76ff10653531165b1dd9848d4
+  ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+  ORFS_ROOT: /tmp/openroad-research-orfs
+
+jobs:
+  paired-seed:
+    name: ${{ matrix.config.width }}x${{ matrix.config.depth }} seed ${{ matrix.seed }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        config:
+          - {width: 8, depth: 8}
+          - {width: 16, depth: 8}
+          - {width: 16, depth: 16}
+          - {width: 64, depth: 16}
+          - {width: 16, depth: 64}
+          - {width: 64, depth: 64}
+        seed: [2, 3, 4, 5]
+    env:
+      W: ${{ matrix.config.width }}
+      D: ${{ matrix.config.depth }}
+      READPATH_GPL_SEED: ${{ matrix.seed }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore pinned baseline FIFO RTL
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
+      - name: Fetch pinned ORFS and OpenROAD Docker image
+        run: |
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          test "$(git -C "$ORFS_ROOT" rev-parse HEAD)" = "$ORFS_REV"
+      - name: Independently verify FIFO functionality
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -g2012 -s fifo_readpath_equiv_tb \
+            -P fifo_readpath_equiv_tb.DATA_WIDTH="$W" \
+            -P fifo_readpath_equiv_tb.DEPTH="$D" \
+            -o /tmp/paired.vvp \
+            rtl/fifo_sync.v research/readpath/rtl/fifo_sync_onehot.v \
+            research/readpath/tb/fifo_readpath_equiv_tb.v
+          vvp /tmp/paired.vvp
+      - name: Full matched-core RTL-to-GDSII and post-route SPEF STA
+        run: bash research/readpath/scripts/run_openroad_comparison.sh "$W" "$D" matched
+      - name: Validate extracted metrics and original finish-stage power
+        run: |
+          python3 - <<'PY'
+          import csv, json, os, pathlib
+          w,d,seed = int(os.environ["W"]),int(os.environ["D"]),int(os.environ["READPATH_GPL_SEED"])
+          root=pathlib.Path(f"research-pilot-reports/openroad_{w}x{d}_matched_seed{seed}")
+          comp=json.loads((root/"comparison.json").read_text())
+          b,e=comp["baseline"],comp["decoder"]
+          assert b["routing_drc_final"] == e["routing_drc_final"] == 0
+          assert (root/"baseline_placement-sha256.txt").is_file() and (root/"decoder_placement-sha256.txt").is_file()
+          bp=float(b["read_path"]["clock_to_data_ns"])
+          ep=float(e["read_path"]["clock_to_data_ns"])
+          assert bp>0 and ep>0
+          row={"width":w,"depth":d,"seed":seed,
+               "baseline_read_ns":bp,"decoder_read_ns":ep,
+               "read_reduction_pct":100*(bp-ep)/bp,
+               "baseline_area_um2":b["finish_area_from_json"],
+               "decoder_area_um2":e["finish_area_from_json"],
+               "baseline_setup_slack_ns":b["worst_overall_setup_slack_ns"],
+               "decoder_setup_slack_ns":e["worst_overall_setup_slack_ns"],
+               "baseline_placement_hash":(root/"baseline_placement-sha256.txt").read_text().strip(),
+               "decoder_placement_hash":(root/"decoder_placement-sha256.txt").read_text().strip()}
+          for arch in ("baseline","decoder"):
+              metrics=json.loads((root/f"{arch}_6_report.json").read_text())
+              for key in ("internal","switching","leakage"):
+                  row[f"{arch}_{key}_W"]=float(metrics[f"finish__power__{key}__total"])
+              row[f"{arch}_total_W"]=float(metrics["finish__power__total"])
+              assert abs(row[f"{arch}_total_W"]-sum(row[f"{arch}_{k}_W"] for k in ("internal","switching","leakage")))<1e-6
+          (root/"reviewer_five_seed_metrics.json").write_text(json.dumps(row,indent=2)+"\n")
+          with (root/"reviewer_five_seed_metrics.csv").open("w",newline="") as f:
+              writer=csv.DictWriter(f,fieldnames=list(row))
+              writer.writeheader()
+              writer.writerow(row)
+          print(json.dumps(row,indent=2))
+          PY
+      - name: Archive full routed evidence and per-seed data even if incomplete
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kruger-five-seed-${{ matrix.config.width }}x${{ matrix.config.depth }}-s${{ matrix.seed }}-${{ github.run_id }}
+          path: research-pilot-reports/openroad_${{ matrix.config.width }}x${{ matrix.config.depth }}_matched_seed${{ matrix.seed }}/
+          retention-days: 90
+          if-no-files-found: warn
+
+  consolidate:
+    name: Collect verified complete per-seed reports
+    needs: paired-seed
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kruger-five-seed-*-${{ github.run_id }}
+          path: collected
+      - name: Write completed results and completeness audit
+        run: |
+          python3 - <<'PY'
+          import pathlib,json,csv
+          root=pathlib.Path("collected")
+          rows=[json.loads(p.read_text()) for p in root.glob("**/reviewer_five_seed_metrics.json")]
+          rows.sort(key=lambda r:(r["width"],r["depth"],r["seed"]))
+          out=pathlib.Path("kruger-seed-summary");out.mkdir(exist_ok=True)
+          if rows:
+              with (out/"completed_seed_results.csv").open("w",newline="") as f:
+                  writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+                  writer.writeheader();writer.writerows(rows)
+          expected=[(8,8),(16,8),(16,16),(64,16),(16,64),(64,64)]
+          audit={f"{w}x{d}":{"completed_seeds":sorted(r["seed"] for r in rows if (r["width"],r["depth"])==(w,d)),
+                              "expected_seeds":[2,3,4,5]} for w,d in expected}
+          (out/"completeness.json").write_text(json.dumps(audit,indent=2)+"\n")
+          print(json.dumps(audit,indent=2))
+          if len(rows)!=24: print("PARTIAL: Not all 24 requested new seed runs completed.")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kruger-five-seed-summary-${{ github.run_id }}
+          path: kruger-seed-summary/
+          retention-days: 90
+          if-no-files-found: warn
