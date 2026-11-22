@@ -1,4 +1,4 @@
-name: Kruger reviewer study — additional FIFO widths and post-route power
+name: Kruger reviewer study — complete 4x4 FIFO timing and power matrix
 
 on:
   push:
@@ -26,9 +26,10 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - {width: 4, depth: 16}
-          - {width: 16, depth: 16}
-          - {width: 64, depth: 16}
+          - {width: 8, depth: 8}
+          - {width: 16, depth: 8}
+          - {width: 16, depth: 64}
+          - {width: 64, depth: 64}
     env:
       W: ${{ matrix.width }}
       D: ${{ matrix.depth }}
@@ -64,14 +65,15 @@ jobs:
           import csv, json, os, pathlib
           w, d = int(os.environ["W"]), int(os.environ["D"])
           out = pathlib.Path(f"research-pilot-reports/openroad_{w}x{d}_matched_seed1")
-          fields = ("internal", "switching", "leakage", "total")
+          fields = ("internal", "switching", "leakage")
           rows=[]
           for architecture in ("baseline", "decoder"):
               report = out / f"{architecture}_6_report.json"
               data=json.loads(report.read_text())
               p={component: data[f"finish__power__{component}__total"] for component in fields}
+              p["total"]=data["finish__power__total"]
               assert all(isinstance(v, (int, float)) and v>=0 for v in p.values()), (report,p)
-              assert abs(sum(p[x] for x in fields[:-1])-p["total"]) < 1e-6, (report,p)
+              assert abs(sum(p[x] for x in fields)-p["total"]) < 1e-6, (report,p)
               row={"width":w,"depth":d,"architecture":architecture,"seed":1,
                    "standard_cell_area_um2":data["finish__design__instance__area__stdcell"],
                    "worst_setup_slack_ns":data["finish__timing__setup__ws"],
@@ -120,8 +122,8 @@ jobs:
               writer=csv.DictWriter(f,fieldnames=list(rows[0]))
               writer.writeheader()
               writer.writerows(rows)
-          print(f"Complete architecture/configuration results: {len(rows)}; expected 6")
-          if len(rows)!=6: print("PARTIAL RESULT: missing configurations; do not infer unmeasured results")
+          print(f"Complete architecture/configuration results: {len(rows)}; expected 8")
+          if len(rows)!=8: print("PARTIAL RESULT: missing configurations; do not infer unmeasured results")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
