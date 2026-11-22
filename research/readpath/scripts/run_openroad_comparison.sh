@@ -154,7 +154,7 @@ PY
 )"
   read -r die core_x core_y < <(python3 - "$max_area" <<'PY'
 import math, sys
-side = math.ceil((math.sqrt(float(sys.argv[1]) / .40) + 2.5) * 2) / 2
+side = max(40.0, math.ceil((math.sqrt(float(sys.argv[1]) / .40) + 2.5) * 2) / 2)
 print(f"{side:.3f} {side-1.14:.3f} {side-1.40:.3f}")
 PY
 )
