@@ -1,4 +1,4 @@
-name: Kruger reviewer study — complete 4x4 FIFO timing and power matrix
+name: Kruger reviewer study — fill remaining 4-32 width-depth cases
 
 on:
   push:
@@ -26,10 +26,12 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - {width: 8, depth: 8}
-          - {width: 16, depth: 8}
-          - {width: 16, depth: 64}
-          - {width: 64, depth: 64}
+          - {width: 4, depth: 4}
+          - {width: 4, depth: 8}
+          - {width: 4, depth: 32}
+          - {width: 8, depth: 4}
+          - {width: 16, depth: 4}
+          - {width: 32, depth: 4}
     env:
       W: ${{ matrix.width }}
       D: ${{ matrix.depth }}
@@ -122,8 +124,8 @@ jobs:
               writer=csv.DictWriter(f,fieldnames=list(rows[0]))
               writer.writeheader()
               writer.writerows(rows)
-          print(f"Complete architecture/configuration results: {len(rows)}; expected 8")
-          if len(rows)!=8: print("PARTIAL RESULT: missing configurations; do not infer unmeasured results")
+          print(f"Complete architecture/configuration results: {len(rows)}; expected 12")
+          if len(rows)!=12: print("PARTIAL RESULT: missing configurations; do not infer unmeasured results")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
