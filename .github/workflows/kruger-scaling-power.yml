@@ -1,0 +1,132 @@
+name: Kruger reviewer study — additional FIFO widths and post-route power
+
+on:
+  push:
+    branches: [research/kruger-scaling-power-2026]
+    paths:
+      - ".github/workflows/kruger-scaling-power.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ORFS_REV: d056a2b304182bf76ff10653531165b1dd9848d4
+  ORFS_IMAGE: openroad/orfs@sha256:641c6870a2c64143464d46017dd25ab647900fd29dce502230a2db0682e69bc9
+  ORFS_ROOT: /tmp/openroad-research-orfs
+  READPATH_GPL_SEED: "1"
+
+jobs:
+  matched-new-configurations:
+    name: Baseline and decoder — ${{ matrix.width }}x${{ matrix.depth }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - {width: 4, depth: 16}
+          - {width: 16, depth: 16}
+          - {width: 64, depth: 16}
+    env:
+      W: ${{ matrix.width }}
+      D: ${{ matrix.depth }}
+    steps:
+      - name: Check out pinned research branch
+        uses: actions/checkout@v4
+      - name: Fetch verified public baseline
+        run: bash research/readpath/scripts/fetch_public_baseline.sh
+      - name: Install pinned ORFS and OpenROAD image
+        run: |
+          git clone --filter=blob:none https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git "$ORFS_ROOT"
+          git -C "$ORFS_ROOT" checkout "$ORFS_REV"
+          git -C "$ORFS_ROOT" submodule update --init --recursive --depth 1
+          docker pull "$ORFS_IMAGE"
+          echo "ORFS commit: $(git -C "$ORFS_ROOT" rev-parse HEAD)"
+      - name: Functional comparison before implementation
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -g2012 -s fifo_readpath_equiv_tb \
+            -P fifo_readpath_equiv_tb.DATA_WIDTH="$W" \
+            -P fifo_readpath_equiv_tb.DEPTH="$D" \
+            -o /tmp/kruger-test.vvp \
+            rtl/fifo_sync.v research/readpath/rtl/fifo_sync_onehot.v \
+            research/readpath/tb/fifo_readpath_equiv_tb.v
+          vvp /tmp/kruger-test.vvp
+      - name: Complete paired routed implementation and STA
+        run: |
+          bash research/readpath/scripts/run_openroad_comparison.sh "$W" "$D" matched
+      - name: Extract original OpenROAD finish-stage power and PPA metrics
+        run: |
+          python3 - <<'PY'
+          import csv, json, os, pathlib
+          w, d = int(os.environ["W"]), int(os.environ["D"])
+          out = pathlib.Path(f"research-pilot-reports/openroad_{w}x{d}_matched_seed1")
+          fields = ("internal", "switching", "leakage", "total")
+          rows=[]
+          for architecture in ("baseline", "decoder"):
+              report = out / f"{architecture}_6_report.json"
+              data=json.loads(report.read_text())
+              p={component: data[f"finish__power__{component}__total"] for component in fields}
+              assert all(isinstance(v, (int, float)) and v>=0 for v in p.values()), (report,p)
+              assert abs(sum(p[x] for x in fields[:-1])-p["total"]) < 1e-6, (report,p)
+              row={"width":w,"depth":d,"architecture":architecture,"seed":1,
+                   "standard_cell_area_um2":data["finish__design__instance__area__stdcell"],
+                   "worst_setup_slack_ns":data["finish__timing__setup__ws"],
+                   "worst_hold_slack_ns":data["finish__timing__hold__ws"],
+                   "power_internal_W":p["internal"],"power_switching_W":p["switching"],
+                   "power_leakage_W":p["leakage"],"power_total_W":p["total"],
+                   "power_activity_method":"ORFS default; no external VCD or SAIF supplied"}
+              rows.append(row)
+              print(json.dumps(row,indent=2))
+          (out/"reviewer_power_summary.json").write_text(json.dumps(rows,indent=2)+"\n")
+          with (out/"reviewer_power_summary.csv").open("w",newline="") as f:
+              writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+          PY
+      - name: Archive complete physical evidence and power summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kruger-${{ matrix.width }}x${{ matrix.depth }}-s1-${{ github.run_id }}
+          path: research-pilot-reports/openroad_${{ matrix.width }}x${{ matrix.depth }}_matched_seed1/
+          if-no-files-found: warn
+          retention-days: 90
+
+  summarize:
+    name: Aggregate new baseline power and physical metrics
+    needs: matched-new-configurations
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: kruger-*
+          path: collected
+      - name: Produce transparent, complete-run-only CSV
+        run: |
+          python3 - <<'PY'
+          import csv,json,pathlib
+          reports=list(pathlib.Path("collected").glob("**/reviewer_power_summary.json"))
+          pathlib.Path("summary").mkdir(exist_ok=True)
+          rows=[]
+          for p in reports: rows += json.loads(p.read_text())
+          rows.sort(key=lambda r:(r["depth"],r["width"],r["architecture"]))
+          if not rows: raise SystemExit("No successful completed configurations")
+          with open("summary/reviewer_power_summary.csv","w",newline="") as f:
+              writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+              writer.writeheader()
+              writer.writerows(rows)
+          print(f"Complete architecture/configuration results: {len(rows)}; expected 6")
+          if len(rows)!=6: print("PARTIAL RESULT: missing configurations; do not infer unmeasured results")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kruger-aggregated-${{ github.run_id }}
+          path: summary/
+          if-no-files-found: warn
+          retention-days: 90
